@@ -159,9 +159,6 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   void _handleQRData(String qrData) {
     print('🎯 QR 데이터 처리 시작: $qrData');
 
-    // 일단 간단하게 현재 페이지로 전송
-    _sendToCurrentPage(qrData);
-
     // 추가 옵션을 원한다면 다이얼로그 표시
     _showQRDataDialog(qrData);
   }
@@ -211,35 +208,6 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             child: const Text('API로 전송'),
           ),
         ],
-      ),
-    );
-  }
-
-  // 현재 페이지로 QR 데이터 전송
-  void _sendToCurrentPage(String qrData) {
-    // 기존 방식: 현재 웹페이지로 JavaScript 전송
-    webViewController.runJavaScript('''
-      // QR 데이터를 전역 변수로 설정
-      window.qrData = '$qrData';
-      
-      // 커스텀 이벤트 발생
-      window.dispatchEvent(new CustomEvent('qrScanned', {
-        detail: {
-          qrData: '$qrData',
-          timestamp: new Date().toISOString()
-        }
-      }));
-      
-      // 만약 특정 함수가 있다면 호출
-      if (typeof handleQRData === 'function') {
-        handleQRData('$qrData');
-      }
-    ''');
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('QR 데이터가 현재 페이지로 전송되었습니다: $qrData'),
-        duration: const Duration(seconds: 3),
       ),
     );
   }
