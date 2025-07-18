@@ -155,15 +155,19 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
     );
   }
 
-  // QR 데이터 처리
+// _handleQRData 메서드 수정
   void _handleQRData(String qrData) {
     print('🎯 QR 데이터 처리 시작: $qrData');
 
-    // 추가 옵션을 원한다면 다이얼로그 표시
-    _showQRDataDialog(qrData);
+    // QR 스캔 화면이 완전히 닫힌 후 다이얼로그 표시
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        _showQRDataDialog(qrData);
+      }
+    });
   }
 
-  // QR 데이터 다이얼로그 표시 (선택사항)
+  // _showQRDataDialog 메서드 수정
   void _showQRDataDialog(String qrData) {
     showDialog(
       context: context,
@@ -183,22 +187,20 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('✅ 현재 페이지로 전송되었습니다'),
-            const SizedBox(height: 8),
-            const Text('추가 작업을 원하시면 아래 버튼을 클릭하세요.'),
+            const Text('어떤 작업을 수행하시겠습니까?'),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('닫기'),
+            child: const Text('취소'),
           ),
           ElevatedButton(
             onPressed: () {
               Navigator.of(context).pop();
               _sendToSpecificPage(qrData);
             },
-            child: const Text('특정 페이지로 전송'),
+            child: const Text('특정 페이지로 이동'),
           ),
           ElevatedButton(
             onPressed: () {
@@ -211,6 +213,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
       ),
     );
   }
+
 
   // 특정 페이지로 이동하면서 QR 데이터 전송
   void _sendToSpecificPage(String qrData) {
@@ -423,7 +426,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     super.dispose();
   }
 
-  // QR 코드 스캔 처리
+// _onDetect 메서드 수정 (QRScannerScreen 내부)
   void _onDetect(BarcodeCapture capture) {
     if (!isScanning) return;
 
@@ -441,15 +444,11 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
         // 카메라 정지
         cameraController.stop();
 
+        // 즉시 스캔 화면 닫기
+        Navigator.of(context).pop();
+
         // 스캔된 데이터를 부모 화면으로 전달
         widget.onQRScanned(code);
-
-        // 0.5초 후 스캔 화면 닫기
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
-        });
       }
     }
   }
