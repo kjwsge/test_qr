@@ -71,6 +71,20 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   void _initializeWebView() {
     webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+    // JavaScript Channel 추가
+      ..addJavaScriptChannel(
+        'FlutterApp',
+        onMessageReceived: (JavaScriptMessage message) {
+          try {
+            // JSON 문자열을 파싱
+            final Map<String, dynamic> jsonData = jsonDecode(message.message);
+            _handleWebData(jsonData);
+          } catch (e) {
+            print('❌ JSON 파싱 오류: $e');
+            _showErrorDialog('웹에서 받은 데이터 형식이 올바르지 않습니다.');
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
@@ -95,6 +109,82 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
         ),
       );
     print('🔩 웹뷰 초기화 완료');
+  }
+// 웹에서 받은 JSON 데이터 처리
+  void _handleWebData(Map<String, dynamic> jsonData) {
+    print('🌐 웹에서 JSON 데이터 수신: $jsonData');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('웹에서 데이터 수신'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('받은 데이터:'),
+            const SizedBox(height: 8),
+            SelectableText(
+              jsonEncode(jsonData),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('어떤 작업을 수행하시겠습니까?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _sendWebDataToAPI(jsonData);
+            },
+            child: const Text('API로 전송'),
+          ),
+        ],
+      ),
+    );
+  }
+
+// 웹 데이터를 API로 전송
+  Future<void> _sendWebDataToAPI(Map<String, dynamic> jsonData) async {
+    const String apiUrl = 'http://61.250.235.29:9090/LSEVP/Post/QR';
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(jsonData), // 받은 JSON을 그대로 전송
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('웹 데이터가 API로 전송되었습니다: ${jsonEncode(jsonData)}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } else {
+        throw Exception('API 응답 오류: ${response.statusCode}');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('API 전송 실패: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // 마지막 접속 URL 저장
