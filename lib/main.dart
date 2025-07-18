@@ -34,7 +34,6 @@ class WebBrowserScreen extends StatefulWidget {
 
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
-  final TextEditingController _urlController = TextEditingController();
   String currentUrl = '';
   String defaultUrl = 'http://61.250.235.29:9099/'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
@@ -58,14 +57,12 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
     }
   }
 
-
 // 설정 로드
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.29:9099';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
-      _urlController.text = currentUrl;
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
   }
@@ -80,14 +77,12 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             setState(() {
               isLoading = true;
               currentUrl = url;
-              _urlController.text = url;
             });
           },
           onPageFinished: (String url) {
             setState(() {
               isLoading = false;
               currentUrl = url;
-              _urlController.text = url;
             });
             _saveLastUrl(url);
           },
@@ -416,30 +411,6 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
       ),
       body: Column(
         children: [
-          // URL 입력창
-          Container(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _urlController,
-                    decoration: const InputDecoration(
-                      hintText: 'URL을 입력하세요',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    onSubmitted: (value) => _loadUrl(value),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () async => await _loadUrl(_urlController.text),
-                  child: const Text('이동'),
-                ),
-              ],
-            ),
-          ),
           // 로딩 인디케이터
           if (isLoading)
             const LinearProgressIndicator(),
@@ -456,7 +427,6 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
   @override
   void dispose() {
-    _urlController.dispose();
     super.dispose();
   }
 }
@@ -544,50 +514,50 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
             onDetect: _onDetect,
           ),
 
-          // 스캔 완료 표시
-          if (scannedData != null)
-            Container(
-              width: double.infinity,
-              height: double.infinity,
-              color: Colors.black.withOpacity(0.7),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  margin: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.check_circle,
-                        color: Colors.green,
-                        size: 60,
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'QR 코드 스캔 완료!',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        scannedData!,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          // // 스캔 완료 표시
+          // if (scannedData != null)
+          //   Container(
+          //     width: double.infinity,
+          //     height: double.infinity,
+          //     color: Colors.black.withOpacity(0.7),
+          //     child: Center(
+          //       child: Container(
+          //         padding: const EdgeInsets.all(20),
+          //         margin: const EdgeInsets.all(20),
+          //         decoration: BoxDecoration(
+          //           color: Colors.white,
+          //           borderRadius: BorderRadius.circular(10),
+          //         ),
+          //         child: Column(
+          //           mainAxisSize: MainAxisSize.min,
+          //           children: [
+          //             const Icon(
+          //               Icons.check_circle,
+          //               color: Colors.green,
+          //               size: 60,
+          //             ),
+          //             const SizedBox(height: 16),
+          //             const Text(
+          //               'QR 코드 스캔 완료!',
+          //               style: TextStyle(
+          //                 fontSize: 18,
+          //                 fontWeight: FontWeight.bold,
+          //               ),
+          //             ),
+          //             const SizedBox(height: 8),
+          //             Text(
+          //               scannedData!,
+          //               style: const TextStyle(
+          //                 fontSize: 14,
+          //                 color: Colors.grey,
+          //               ),
+          //               textAlign: TextAlign.center,
+          //             ),
+          //           ],
+          //         ),
+          //       ),
+          //     ),
+          //   ),
 
           // 스캔 가이드 오버레이 (스캔 중일 때만 표시)
           if (isScanning)
