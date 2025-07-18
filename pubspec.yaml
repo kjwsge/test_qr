@@ -46,6 +46,7 @@ dependencies:
   shared_preferences: ^2.2.2
   # URL 유효성 검사를 위한 패키지
   url_launcher: ^6.2.2
+  web_socket_channel: ^2.4.0
 
 dev_dependencies:
   flutter_test:

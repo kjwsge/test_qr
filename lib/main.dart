@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/status.dart' as status;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,12 +39,151 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   String currentUrl = '';
   String defaultUrl = 'http://61.250.235.29:9099/'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
+  WebSocketChannel? _webSocketChannel;
+  bool _isWebSocketConnected = false;
 
   @override
   void initState() {
     super.initState();
     // 설정 로드 후 웹뷰 초기화 및 URL 로드
     _initApp();
+    _connectWebSocket(); // 웹소켓 연결 추가
+  }
+  // 웹소켓 연결
+  Future<void> _connectWebSocket() async {
+    try {
+      print('🔌 웹소켓 서버 연결 시도...');
+
+      _webSocketChannel = WebSocketChannel.connect(
+        Uri.parse('ws://61.250.235.76:8080'), // 🔧 서버 IP 입력
+      );
+
+      // 연결 성공 처리
+      setState(() {
+        _isWebSocketConnected = true;
+      });
+
+      print('✅ 웹소켓 서버 연결 성공');
+
+      // 메시지 수신 대기
+      _webSocketChannel!.stream.listen(
+            (message) {
+          print('📨 웹소켓 메시지 수신: $message');
+          _handleWebSocketMessage(message);
+        },
+        onError: (error) {
+          print('❌ 웹소켓 오류: $error');
+          setState(() {
+            _isWebSocketConnected = false;
+          });
+        },
+        onDone: () {
+          print('🔌 웹소켓 연결 종료');
+          setState(() {
+            _isWebSocketConnected = false;
+          });
+        },
+      );
+
+      // 연결 확인 메시지 전송
+      _sendWebSocketMessage({
+        'type': 'flutter_connected',
+        'device': 'flutter_app',
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+
+    } catch (e) {
+      print('❌ 웹소켓 연결 실패: $e');
+      setState(() {
+        _isWebSocketConnected = false;
+      });
+    }
+  }
+
+  // 웹소켓 메시지 전송
+  void _sendWebSocketMessage(Map<String, dynamic> data) {
+    if (_webSocketChannel != null && _isWebSocketConnected) {
+      final message = jsonEncode(data);
+      _webSocketChannel!.sink.add(message);
+      print('📤 웹소켓 메시지 전송: $message');
+    } else {
+      print('❌ 웹소켓이 연결되지 않음');
+    }
+  }
+
+  // 웹소켓 메시지 수신 처리
+  void _handleWebSocketMessage(dynamic message) {
+    try {
+      final Map<String, dynamic> data = jsonDecode(message);
+      print('🎯 웹소켓 데이터 처리: $data');
+
+      // 타입별 처리
+      switch (data['type']) {
+        case 'qr_data':
+          _showWebSocketQRDialog(data);
+          break;
+        case 'web_message':
+          _showWebSocketDataDialog(data);
+          break;
+        default:
+          _showWebSocketDataDialog(data);
+      }
+
+    } catch (e) {
+      print('❌ 웹소켓 메시지 파싱 오류: $e');
+      _showErrorDialog('웹소켓 메시지 형식 오류: $message');
+    }
+  }
+
+  // 웹소켓 QR 데이터 다이얼로그
+  void _showWebSocketQRDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('웹소켓으로 QR 데이터 수신'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('QR 코드: ${data['qrCode'] ?? 'N/A'}'),
+            Text('전송자: ${data['sender'] ?? 'Unknown'}'),
+            Text('시간: ${data['timestamp'] ?? 'N/A'}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _sendToAPI(data['qrCode'] ?? '');
+            },
+            child: const Text('API로 전송'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 웹소켓 일반 데이터 다이얼로그
+  void _showWebSocketDataDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('웹소켓 데이터 수신'),
+        content: SingleChildScrollView(
+          child: Text(jsonEncode(data)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _initApp() async {
@@ -249,12 +390,20 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   void _handleQRData(String qrData) {
     print('🎯 QR 데이터 처리 시작: $qrData');
 
-    // QR 스캔 화면이 완전히 닫힌 후 다이얼로그 표시
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
-        _showQRDataDialog(qrData);
-      }
+    // 웹소켓으로 전송
+    _sendWebSocketMessage({
+      'type': 'qr_data',
+      'qrCode': qrData,
+      'sender': 'flutter_app',
+      'timestamp': DateTime.now().toIso8601String(),
     });
+
+    // // QR 스캔 화면이 완전히 닫힌 후 다이얼로그 표시
+    // Future.delayed(const Duration(milliseconds: 100), () {
+    //   if (mounted) {
+    //     _showQRDataDialog(qrData);
+    //   }
+    // });
   }
 
   // _showQRDataDialog 메서드 수정
@@ -420,7 +569,21 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR Web Browser'),
+        title: Row(
+          children: [
+            const Text('QR Web Browser'),
+            const SizedBox(width: 8),
+            // 웹소켓 연결 상태 표시
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: _isWebSocketConnected ? Colors.green : Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        ),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
@@ -488,6 +651,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
   @override
   void dispose() {
+    _webSocketChannel?.sink.close(status.goingAway);
     super.dispose();
   }
 }
