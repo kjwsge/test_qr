@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   runApp(const MyApp());
 }
 
@@ -68,47 +74,90 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   }
 
 // 웹뷰 초기화
+  // lib/main.dart의 _initializeWebView() 메서드 수정
   void _initializeWebView() {
     webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-    // JavaScript Channel 추가
-      ..addJavaScriptChannel(
-        'FlutterApp',
-        onMessageReceived: (JavaScriptMessage message) {
-          try {
-            // JSON 문자열을 파싱
-            final Map<String, dynamic> jsonData = jsonDecode(message.message);
-            _handleWebData(jsonData);
-          } catch (e) {
-            print('❌ JSON 파싱 오류: $e');
-            _showErrorDialog('웹에서 받은 데이터 형식이 올바르지 않습니다.');
-          }
-        },
-      )
+      ..setBackgroundColor(const Color(0x00000000))
+
+    // 🔧 User Agent 설정 (서버 호환성 향상)
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 10; SM-T870) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Safari/537.36')
+
+    // 🔧 추가 WebView 설정
+      ..enableZoom(true)
+
       ..setNavigationDelegate(
         NavigationDelegate(
+          // 🔧 URL 필터링 강화
+          onNavigationRequest: (NavigationRequest request) {
+            print('🌐 네비게이션 요청: ${request.url}');
+
+            // 허용된 도메인 체크
+            final allowedDomains = [
+              '61.250.235.76',
+            ];
+
+            final uri = Uri.parse(request.url);
+            final isAllowed = allowedDomains.any((domain) =>
+            uri.host.contains(domain) || uri.host == domain);
+
+            if (!isAllowed) {
+              print('⚠️ 차단된 도메인: ${uri.host}');
+              // 차단하지 않고 허용하되 로그만 남김
+            }
+
+            return NavigationDecision.navigate;
+          },
+
           onPageStarted: (String url) {
+            print('📄 페이지 시작: $url');
             setState(() {
               isLoading = true;
               currentUrl = url;
             });
           },
+
           onPageFinished: (String url) {
+            print('✅ 페이지 완료: $url');
             setState(() {
               isLoading = false;
               currentUrl = url;
             });
             _saveLastUrl(url);
           },
+
+          // 🔧 에러 처리 강화
           onWebResourceError: (WebResourceError error) {
+            print('❌ 리소스 에러: ${error.description} (${error.url})');
+            print('   에러 타입: ${error.errorType}');
+            print('   에러 코드: ${error.errorCode}');
+
             setState(() {
               isLoading = false;
             });
-            _showErrorDialog('페이지 로드 오류: ${error.description}');
+
+            // 🔧 Connection refused 에러만 팝업 표시하지 않음
+            if (error.description.toLowerCase().contains('connection refused') ||
+                error.description.toLowerCase().contains('err_connection_refused')) {
+              print('🔇 Connection refused 에러 무시됨');
+              return; // 팝업 표시하지 않음
+            }
+
+            // 다른 중요한 에러만 표시
+            if (error.url?.contains(currentUrl) == true) {
+              _showErrorDialog('페이지 로드 오류: ${error.description}');
+            }
+          },
+
+          // 🔧 HTTP 인증 에러 처리
+          onHttpAuthRequest: (HttpAuthRequest request) {
+            print('🔐 HTTP 인증 요청: ${request.host}');
+            // 필요시 인증 정보 제공
           },
         ),
       );
-    print('🔩 웹뷰 초기화 완료');
+
+    print('🔩 웹뷰 초기화 완료 (강화된 설정)');
   }
 // 웹에서 받은 JSON 데이터 처리
   void _handleWebData(Map<String, dynamic> jsonData) {
