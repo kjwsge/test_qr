@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'QR Web Browser',
+      title: 'PeopleWorks CheckList',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
@@ -35,7 +35,7 @@ class WebBrowserScreen extends StatefulWidget {
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
   String currentUrl = '';
-  String defaultUrl = 'http://61.250.235.29:9099/'; // 🔧 여기에 기본 URL을 입력하세요
+  String defaultUrl = 'http://61.250.235.76:9090/'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
 
   @override
@@ -61,7 +61,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.29:9099';
+      defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.76:9090';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
@@ -154,7 +154,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
 // 웹 데이터를 API로 전송
   Future<void> _sendWebDataToAPI(Map<String, dynamic> jsonData) async {
-    const String apiUrl = 'http://61.250.235.29:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://61.250.235.76:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -326,7 +326,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // API로 QR 데이터 전송 (현재 페이지는 그대로)
   Future<void> _sendToAPI(String qrData) async {
     // 특정 API URL 설정 (여기서 수정하세요)
-    const String apiUrl = 'http://61.250.235.29:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://61.250.235.76:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -420,9 +420,10 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR Web Browser'),
+        title: const Text('PeopleWorks CheckList'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code_scanner),
@@ -623,10 +624,6 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
               height: double.infinity,
               child: Stack(
                 children: [
-                  // 반투명 배경
-                  Container(
-                    color: Colors.black.withOpacity(0.3),
-                  ),
                   // 스캔 영역 (투명한 사각형)
                   Center(
                     child: Container(
