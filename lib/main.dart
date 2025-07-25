@@ -26,7 +26,13 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const WebBrowserScreen(),
+      home: const SafeArea(
+        left: false,  // 좌측은 edge-to-edge 유지
+        right: false, // 우측은 edge-to-edge 유지
+        top: false,    // 상단 상태바 edge-to-edge 유지
+        bottom: true, // 하단 네비게이션 바 영역 회피
+        child: WebBrowserScreen(),
+      ),
     );
   }
 }
@@ -41,8 +47,9 @@ class WebBrowserScreen extends StatefulWidget {
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
   String currentUrl = '';
-  String defaultUrl = 'http://61.250.235.76:9090/'; // 🔧 여기에 기본 URL을 입력하세요
+  String defaultUrl = 'http://61.250.235.76:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
+  String webPageTitle = 'PeopleWorks CheckList';
 
   @override
   void initState() {
@@ -67,7 +74,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.76:9090';
+      defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.76:9090/Home/Preshiftcheck_list';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
@@ -85,7 +92,15 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
     // 🔧 추가 WebView 설정
       ..enableZoom(true)
-
+// JavaScript 채널 추가
+      ..addJavaScriptChannel(
+        'TitleChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          setState(() {
+            webPageTitle = message.message; // 웹페이지 제목 업데이트
+          });
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           // 🔧 URL 필터링 강화
@@ -115,6 +130,9 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
               isLoading = true;
               currentUrl = url;
             });
+
+            // 즉시 헤더 숨기기 CSS 주입
+            _injectHideHeaderCSS();
           },
 
           onPageFinished: (String url) {
@@ -124,6 +142,8 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
               currentUrl = url;
             });
             _saveLastUrl(url);
+            // 웹페이지 제목 추출 및 헤더 숨기기
+            _extractPageTitle();
           },
 
           // 🔧 에러 처리 강화
@@ -330,25 +350,35 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('취소'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _sendToSpecificPage(qrData);
-            },
-            child: const Text('특정 페이지로 이동'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _sendToAPI(qrData);
-            },
-            child: const Text('API로 전송'),
-          ),
+           ElevatedButton(
+             onPressed: () {
+               Navigator.of(context).pop();
+               _sendToSpecificPage(qrData);
+             },
+             child: const Text('특정 페이지로 이동'),
+           ),
         ],
+        // actions: [
+
+          // TextButton(
+          //   onPressed: () => Navigator.of(context).pop(),
+          //   child: const Text('취소'),
+          // ),
+          // ElevatedButton(
+          //   onPressed: () {
+          //     Navigator.of(context).pop();
+          //     _sendToSpecificPage(qrData);
+          //   },
+          //   child: const Text('특정 페이지로 이동'),
+          // ),
+          // ElevatedButton(
+          //   onPressed: () {
+          //     Navigator.of(context).pop();
+          //     _sendToAPI(qrData);
+          //   },
+          //   child: const Text('API로 전송'),
+          // ),
+        // ],
       ),
     );
   }
@@ -357,16 +387,16 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // 특정 페이지로 이동하면서 QR 데이터 전송
   void _sendToSpecificPage(String qrData) {
     // 특정 URL 설정 (여기서 수정하세요)
-    const String targetUrl = 'https://your-qr-handler-page.com/receive';
+    const String targetUrl = 'http://61.250.235.76:9090/Home/Preshiftcheck_Create';
 
     // URL 파라미터로 데이터 전달
-    final String urlWithParams = '$targetUrl?qrData=${Uri.encodeComponent(qrData)}&timestamp=${DateTime.now().millisecondsSinceEpoch}';
+    final String urlWithParams = '$targetUrl?CheckType=${'DAILY'}&Date=${DateTime.now()}&Process=${'SMD'}&Line=${'SMTALine'}';
 
     _loadUrl(urlWithParams);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('QR 데이터와 함께 특정 페이지로 이동합니다: $qrData'),
+        content: Text('Move by QR Data'),
         duration: const Duration(seconds: 3),
       ),
     );
@@ -464,60 +494,189 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
       ),
     );
   }
+  // JavaScript 실행 메서드 추가
+  Future<void> _injectTitleExtractionScript() async {
+    const String script = '''
+      (function() {
+        // 헤더의 제목 추출
+        const header = document.querySelector('header h1 a, header h1');
+        let title = 'PeopleWorks CheckList'; // 기본값
+        
+      if (header) {
+        title = header.textContent || header.innerText || title;
+        
+        const headerElement = document.querySelector('header');
+        if (headerElement) {
+          headerElement.style.display = 'none';
+          
+          // 컨테이너의 상단 여백도 조정
+          const container = document.querySelector('.container');
+          if (container) {
+            container.style.paddingTop = '0';
+            container.style.marginTop = '0';
+          }
+        }
+      }
+        
+        // Flutter로 제목 전달
+        if (window.TitleChannel) {
+          TitleChannel.postMessage(title);
+        }
+      })();
+    ''';
 
+    try {
+      await webViewController.runJavaScript(script);
+    } catch (e) {
+      print('JavaScript 실행 오류: $e');
+    }
+  }
+// 헤더 숨기기 CSS (onPageStarted에서 실행)
+  Future<void> _injectHideHeaderCSS() async {
+    const String cssScript = '''
+    (function() {
+      const style = document.createElement('style');
+      style.textContent = `
+        header { 
+          display: none !important; 
+          visibility: hidden !important;
+        }
+        .container {
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
+      `;
+      document.head.appendChild(style);
+    })();
+  ''';
+
+    try {
+      await webViewController.runJavaScript(cssScript);
+    } catch (e) {
+      print('CSS 주입 오류: $e');
+    }
+  }
+// 제목 추출만 (onPageFinished에서 실행)
+  Future<void> _extractPageTitle() async {
+    const String titleScript = '''
+    (function() {
+      const header = document.querySelector('header h1 a, header h1');
+      let title = 'PeopleWorks CheckList';
+      
+      if (header) {
+        title = header.textContent || header.innerText || title;
+      }
+      
+      if (window.TitleChannel) {
+        TitleChannel.postMessage(title);
+      }
+    })();
+  ''';
+
+    try {
+      await webViewController.runJavaScript(titleScript);
+    } catch (e) {
+      print('제목 추출 오류: $e');
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PeopleWorks CheckList'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         centerTitle: true,
+        // 왼쪽에 기존 타이틀 배치
+        leading: InkWell(
+          onTap: () async{
+            await _loadUrl(defaultUrl);
+            print('🔍 Url: $defaultUrl');
+          },
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.start, // Row 내부 요소들을 시작점에 정렬
+              children: <Widget>[
+                // 로고 이미지
+                Image.asset(
+                  'assets/MainLogo_Remove.png', // pubspec.yaml에 등록된 로고 이미지 경로
+                  width: 160, // 로고 이미지의 너비 (조절 가능)
+                  height: 44, // 로고 이미지의 높이 (조절 가능)
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(width: 4), // 로고와 텍스트 사이의 간격
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 9.0),
+                    child: Text(
+                      'CheckList',
+                      style: TextStyle(
+                        fontSize: 24, // 텍스트 크기는 공간에 맞게 조절될 수 있음
+                        fontWeight: FontWeight.w500,
+                        color: Color.fromARGB(255,201,30,36), // AppBar의 foregroundColor가 적용되지만 명시적으로 지정 가능
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        leadingWidth: 300, // leading 영역 너비 조정
+        // 중앙에 웹페이지 제목 배치
+        title: Text(
+          webPageTitle,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code_scanner),
             onPressed: _openQRScanner,
             tooltip: 'QR 스캔',
           ),
-          IconButton(
-            icon: const Icon(Icons.home),
-            onPressed: () async => await _loadUrl(defaultUrl),
-            tooltip: '홈으로',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => webViewController.reload(),
-            tooltip: '새로고침',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'settings':
-                  _showSettingsDialog();
-                  break;
-                case 'back':
-                  webViewController.goBack();
-                  break;
-                case 'forward':
-                  webViewController.goForward();
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'back',
-                child: Text('뒤로'),
-              ),
-              const PopupMenuItem(
-                value: 'forward',
-                child: Text('앞으로'),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: Text('설정'),
-              ),
-            ],
-          ),
+          // IconButton(
+          //   icon: const Icon(Icons.home),
+          //   onPressed: () async => await _loadUrl(defaultUrl),
+          //   tooltip: '홈으로',
+          // ),
+          // IconButton(
+          //   icon: const Icon(Icons.refresh),
+          //   onPressed: () => webViewController.reload(),
+          //   tooltip: '새로고침',
+          // ),
+          // PopupMenuButton<String>(
+          //   onSelected: (value) {
+          //     switch (value) {
+          //       case 'settings':
+          //         _showSettingsDialog();
+          //         break;
+          //       case 'back':
+          //         webViewController.goBack();
+          //         break;
+          //       case 'forward':
+          //         webViewController.goForward();
+          //         break;
+          //     }
+          //   },
+          //   itemBuilder: (context) => [
+          //     const PopupMenuItem(
+          //       value: 'back',
+          //       child: Text('뒤로'),
+          //     ),
+          //     const PopupMenuItem(
+          //       value: 'forward',
+          //       child: Text('앞으로'),
+          //     ),
+          //     const PopupMenuItem(
+          //       value: 'settings',
+          //       child: Text('설정'),
+          //     ),
+          //   ],
+          // ),
         ],
       ),
       body: Column(
@@ -597,19 +756,19 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR 스캔'),
+        title: const Text('QR Scan'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.flash_on),
             onPressed: () => cameraController.toggleTorch(),
-            tooltip: '플래시',
+            tooltip: 'Flash',
           ),
           IconButton(
             icon: const Icon(Icons.flip_camera_android),
             onPressed: () => cameraController.switchCamera(),
-            tooltip: '카메라 전환',
+            tooltip: 'Change Camera',
           ),
         ],
       ),
@@ -698,7 +857,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                       child: Column(
                         children: [
                           const Text(
-                            'QR 코드를 사각형 안에 맞춰주세요',
+                            'Please align the QR code within the square.',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -708,7 +867,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '스캔 상태: ${isScanning ? "스캔 중..." : "완료"}',
+                            'Scan Status: ${isScanning ? "Scanning..." : "Completed"}',
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
