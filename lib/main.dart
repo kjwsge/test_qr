@@ -47,7 +47,7 @@ class WebBrowserScreen extends StatefulWidget {
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
   String currentUrl = '';
-  String defaultUrl = 'http://61.250.235.76:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
+  String defaultUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
   String webPageTitle = 'PeopleWorks CheckList';
 
@@ -74,7 +74,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      defaultUrl = prefs.getString('default_url') ?? 'http://61.250.235.76:9090/Home/Preshiftcheck_list';
+      defaultUrl = prefs.getString('default_url') ?? 'http://10.10.10.100:9090/Home/Preshiftcheck_list';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
@@ -115,26 +115,25 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
     );
   }
 
-// [팝업창 활성 메소드 - 확인/취소 버튼]
-  Future<bool?> showConfirmDialog(BuildContext context, String message) { // 반환 타입을 bool?로 변경
-    return showDialog<bool>( // showDialog의 제네릭 타입도 bool로 변경
+  Future<bool?> showConfirmDialog(BuildContext context, String message) async {
+    return await showDialog<bool>(
       context: context,
-      barrierDismissible: false, // 사용자가 다이얼로그 바깥을 탭해도 닫히지 않도록 설정 (선택 사항)
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text("Confirm"), // 제목을 "Confirm"으로 변경 (선택 사항)
+          title: const Text("Confirm"),
           content: Text(message),
-          actions: <Widget>[ // actions 타입을 명시적으로 <Widget>으로 지정하는 것이 좋음
-            TextButton( // "Cancel" 버튼은 TextButton을 사용하는 경우가 많음 (덜 강조)
+          actions: <Widget>[
+            TextButton(
               child: const Text("Cancel"),
               onPressed: () {
-                Navigator.of(context).pop(false); // "Cancel"을 누르면 false 반환
+                Navigator.of(context).pop(false);
               },
             ),
-            ElevatedButton( // "Confirm" 버튼은 ElevatedButton을 사용 (더 강조)
-              child: const Text("Confirm"),
+            ElevatedButton(
+              child: const Text("OK"),
               onPressed: () {
-                Navigator.of(context).pop(true); // "Confirm"을 누르면 true 반환
+                Navigator.of(context).pop(true);
               },
             ),
           ],
@@ -167,8 +166,10 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
       ..addJavaScriptChannel('Alert', onMessageReceived: (JavaScriptMessage message){
         showAlertDialog(context, message.message);
       },)
-      ..addJavaScriptChannel('Confirm', onMessageReceived: (JavaScriptMessage message){
-        showConfirmDialog(context, message.message);
+      ..addJavaScriptChannel('Confirm', onMessageReceived: (JavaScriptMessage message) async {
+        final result = await showConfirmDialog(context, message.message);
+        // 결과를 웹으로 전달
+        webViewController.runJavaScript('window._confirmResult = ${result ?? false};');
       },)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -178,7 +179,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
             // 허용된 도메인 체크
             final allowedDomains = [
-              '61.250.235.76',
+              '10.10.10.100',
             ];
 
             final uri = Uri.parse(request.url);
@@ -214,47 +215,52 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             // 웹페이지 제목 추출 및 헤더 숨기기
             _extractPageTitle();
 
-            // TODO [Alert 팝업창 표시 대응 위한 스크립트 코드 작성] >> [Web To App 브릿지 받는 구간에서 Alert 정의 (addJavaScriptChannel)]
             try {
               var javascript = '''
+              // alert 함수 재정의
               window.alert = function (e){
                 var uagent = navigator.userAgent.toLowerCase();
                 var android_agent = uagent.search("android");
-                var iphone = uagent.search("iphone");
-                var ipad = uagent.search("ipad");
                 
                 if (android_agent > -1) {
-
-                    window.Alert.postMessage(String(e));
+                  window.Alert.postMessage(String(e));
                 }
                 else {
-                    window.webkit.messageHandlers.Alert.postMessage(String(e));
+                  window.webkit.messageHandlers.Alert.postMessage(String(e));
                 }
-                
-              }
+              };
+            
+              // confirm 함수 재정의
+              window.confirm = function (message) {
+                return new Promise(function(resolve) {
+                  var uagent = navigator.userAgent.toLowerCase();
+                  var android_agent = uagent.search("android");
+                  
+                  // 결과를 받을 콜백 설정
+                  window._confirmCallback = resolve;
+                  
+                  if (android_agent > -1) {
+                    window.Confirm.postMessage(String(message));
+                  } else {
+                    window.webkit.messageHandlers.Confirm.postMessage(String(message));
+                  }
+                  
+                  // 결과 대기를 위한 폴링
+                  var checkResult = function() {
+                    if (typeof window._confirmResult !== 'undefined') {
+                      var result = window._confirmResult;
+                      delete window._confirmResult;
+                      resolve(result);
+                    } else {
+                      setTimeout(checkResult, 100);
+                    }
+                  };
+                  checkResult();
+                });
+              };
               ''';
 
-              //   var javascript2 = '''
-              // window.confirm = function (e){
-              //   var uagent = navigator.userAgent.toLowerCase();
-              //   var android_agent = uagent.search("android");
-              //   var iphone = uagent.search("iphone");
-              //   var ipad = uagent.search("ipad");
-              //
-              //   if (android_agent > -1) {
-              //
-              //       window.Confirm.postMessage(String(e));
-              //   }
-              //   else {
-              //       window.webkit.messageHandlers.Confirm.postMessage(String(e));
-              //   }
-              //
-              // }
-              // ''';
-
               webViewController.runJavaScript(javascript);
-
-              // webViewController.runJavaScript(javascript2);
             } catch (_) {}
           },
 
@@ -335,7 +341,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
 // 웹 데이터를 API로 전송
   Future<void> _sendWebDataToAPI(Map<String, dynamic> jsonData) async {
-    const String apiUrl = 'http://61.250.235.76:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -430,12 +436,14 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   void _handleQRData(String qrData) {
     print('🎯 QR 데이터 처리 시작: $qrData');
 
+    // 알림창 없이 바로 페이지 이동
+    _sendToSpecificPage(qrData);
     // QR 스캔 화면이 완전히 닫힌 후 다이얼로그 표시
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
-        _showQRDataDialog(qrData);
-      }
-    });
+    // Future.delayed(const Duration(milliseconds: 100), () {
+    //   if (mounted) {
+    //     _showQRDataDialog(qrData);
+    //   }
+    // });
   }
 
   // _showQRDataDialog 메서드 수정
@@ -499,7 +507,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // 특정 페이지로 이동하면서 QR 데이터 전송
   void _sendToSpecificPage(String qrData) {
     // 특정 URL 설정 (여기서 수정하세요)
-    const String targetUrl = 'http://61.250.235.76:9090/Home/Preshiftcheck_Create';
+    const String targetUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_Create';
 
     // URL 파라미터로 데이터 전달
     final String urlWithParams = '$targetUrl?CheckType=${'DAILY'}&Date=${DateTime.now()}&Process=${'SMD'}&Line=${'SMTALine'}';
@@ -517,7 +525,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // API로 QR 데이터 전송 (현재 페이지는 그대로)
   Future<void> _sendToAPI(String qrData) async {
     // 특정 API URL 설정 (여기서 수정하세요)
-    const String apiUrl = 'http://61.250.235.76:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
