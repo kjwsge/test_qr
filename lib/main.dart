@@ -47,9 +47,11 @@ class WebBrowserScreen extends StatefulWidget {
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
   String currentUrl = '';
-  String defaultUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
+  String defaultUrl = 'http://192.168.25.33:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
   String webPageTitle = 'PeopleWorks CheckList';
+  bool isShowingError = false; // 에러 오버레이 표시 상태
+  String? errorMessage; // 에러 메시지
 
   @override
   void initState() {
@@ -74,29 +76,10 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      defaultUrl = prefs.getString('default_url') ?? 'http://10.10.10.100:9090/Home/Preshiftcheck_list';
+      defaultUrl = prefs.getString('default_url') ?? 'http://192.168.25.33:9090/Home/Preshiftcheck_list';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
-  }
-
-  // [브릿지 호출 메소드]
-  Future<void> appToWebCall(WebViewController controller) async {
-    //showAlertDialog(context, "appToWebCall");
-
-
-    // [초기 변수 선언 및 데이터 삽입] : [map]
-    var map = Map<String, dynamic>();
-
-    map["name"] = "twok";
-    map["age"] = 30;
-
-
-    // [jsonEncode : JSON 인코딩 실시]
-    var jsonString = jsonEncode(map);
-
-
-    await controller.runJavaScript('window.onMessageReceive(${jsonString})');
   }
 
   // [팝업창 활성 메소드]
@@ -109,14 +92,14 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
         actions: [
           ElevatedButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: Text("Confirm")),
+              child: Text("OK")),
         ],
       ),
     );
   }
 
-  Future<bool?> showConfirmDialog(BuildContext context, String message) async {
-    return await showDialog<bool>(
+  Future<bool> showConfirmDialog(BuildContext context, String message) async {
+    final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
@@ -124,22 +107,25 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
           title: const Text("Confirm"),
           content: Text(message),
           actions: <Widget>[
-            TextButton(
-              child: const Text("Cancel"),
+
+            ElevatedButton(
+              child: const Text("Yes"),
               onPressed: () {
-                Navigator.of(context).pop(false);
+                Navigator.of(context).pop(true); // 명시적으로 true
               },
             ),
-            ElevatedButton(
-              child: const Text("OK"),
+            TextButton(
+              child: const Text("No"),
               onPressed: () {
-                Navigator.of(context).pop(true);
+                Navigator.of(context).pop(false); // 명시적으로 false
               },
             ),
           ],
         );
       },
     );
+
+    return result ?? false; // null이면 무조건 false
   }
 
 // 웹뷰 초기화
@@ -167,10 +153,22 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
         showAlertDialog(context, message.message);
       },)
       ..addJavaScriptChannel('Confirm', onMessageReceived: (JavaScriptMessage message) async {
-        final result = await showConfirmDialog(context, message.message);
-        // 결과를 웹으로 전달
-        webViewController.runJavaScript('window._confirmResult = ${result ?? false};');
-      },)
+        try {
+          final result = await showConfirmDialog(context, message.message);
+          // 안전하게 boolean 값만 전달
+          await webViewController.runJavaScript('''
+      window._confirmResult = ${result ? 'true' : 'false'};
+      window._confirmWaiting = false;
+    ''');
+        } catch (e) {
+          // 에러 발생 시에도 대기 해제
+          print('Confirm 처리 오류: $e');
+          await webViewController.runJavaScript('''
+      window._confirmResult = false;
+      window._confirmWaiting = false;
+    ''');
+        }
+      })
       ..setNavigationDelegate(
         NavigationDelegate(
           // 🔧 URL 필터링 강화
@@ -179,7 +177,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
             // 허용된 도메인 체크
             final allowedDomains = [
-              '10.10.10.100',
+              '192.168.25.33',
             ];
 
             final uri = Uri.parse(request.url);
@@ -210,6 +208,9 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             setState(() {
               isLoading = false;
               currentUrl = url;
+              // 페이지 로드 성공 시 에러 오버레이 해제
+              isShowingError = false;
+              errorMessage = null;
             });
             _saveLastUrl(url);
             // 웹페이지 제목 추출 및 헤더 숨기기
@@ -217,46 +218,62 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
             try {
               var javascript = '''
-              // alert 함수 재정의
+              window.confirm = function (message) {
+                var uagent = navigator.userAgent.toLowerCase();
+                var android_agent = uagent.search("android");
+                
+                // 초기화
+                window._confirmResult = undefined;
+                window._confirmWaiting = true;
+                
+                try {
+                  if (android_agent > -1) {
+                    window.Confirm.postMessage(String(message));
+                  } else {
+                    window.webkit.messageHandlers.Confirm.postMessage(String(message));
+                  }
+                } catch (e) {
+                  console.log('Confirm 메시지 전송 오류:', e);
+                  window._confirmWaiting = false;
+                  return false;
+                }
+                
+                // 동기적 대기
+                var startTime = Date.now();
+                var maxWait = 30000; // 30초 타임아웃
+                
+                while (window._confirmWaiting && (Date.now() - startTime) < maxWait) {
+                  if (window._confirmResult === 'true') {
+                    window._confirmWaiting = false;
+                    delete window._confirmResult;
+                    return true;
+                  } else if (window._confirmResult === 'false') {
+                    window._confirmWaiting = false;
+                    delete window._confirmResult;
+                    return false;
+                  }
+                  
+                  // CPU 부하 줄이기
+                  var delay = Date.now();
+                  while (Date.now() - delay < 50) {} // 50ms 대기
+                }
+                
+                // 타임아웃 시
+                console.log('Confirm 타임아웃');
+                window._confirmWaiting = false;
+                return false;
+              };
+              
+              // alert는 그대로
               window.alert = function (e){
                 var uagent = navigator.userAgent.toLowerCase();
                 var android_agent = uagent.search("android");
                 
                 if (android_agent > -1) {
                   window.Alert.postMessage(String(e));
-                }
-                else {
+                } else {
                   window.webkit.messageHandlers.Alert.postMessage(String(e));
                 }
-              };
-            
-              // confirm 함수 재정의
-              window.confirm = function (message) {
-                return new Promise(function(resolve) {
-                  var uagent = navigator.userAgent.toLowerCase();
-                  var android_agent = uagent.search("android");
-                  
-                  // 결과를 받을 콜백 설정
-                  window._confirmCallback = resolve;
-                  
-                  if (android_agent > -1) {
-                    window.Confirm.postMessage(String(message));
-                  } else {
-                    window.webkit.messageHandlers.Confirm.postMessage(String(message));
-                  }
-                  
-                  // 결과 대기를 위한 폴링
-                  var checkResult = function() {
-                    if (typeof window._confirmResult !== 'undefined') {
-                      var result = window._confirmResult;
-                      delete window._confirmResult;
-                      resolve(result);
-                    } else {
-                      setTimeout(checkResult, 100);
-                    }
-                  };
-                  checkResult();
-                });
               };
               ''';
 
@@ -274,17 +291,21 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
               isLoading = false;
             });
 
-            // 🔧 Connection refused 에러만 팝업 표시하지 않음
+            // Connection refused 에러는 오버레이도 표시하지 않음
             if (error.description.toLowerCase().contains('connection refused') ||
                 error.description.toLowerCase().contains('err_connection_refused')) {
-              print('🔇 Connection refused 에러 무시됨');
-              return; // 팝업 표시하지 않음
+              print('🔇 Connection refused 에러 무시됨 (오버레이 표시 안함)');
+              return; // 아무것도 표시하지 않고 종료
             }
 
-            // 다른 중요한 에러만 표시
-            if (error.url?.contains(currentUrl) == true) {
-              _showErrorDialog('페이지 로드 오류: ${error.description}');
-            }
+            // 다른 에러들만 오버레이 표시
+            setState(() {
+              isShowingError = true;
+              errorMessage = _getErrorMessage(error);
+            });
+
+            // 에러 페이지 숨기기 CSS 즉시 주입
+            _hideErrorPageWithCSS();
           },
 
           // 🔧 HTTP 인증 에러 처리
@@ -297,6 +318,76 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
     print('🔩 웹뷰 초기화 완료 (강화된 설정)');
   }
+
+  // 에러 메시지 변환 함수
+  String _getErrorMessage(WebResourceError error) {
+    if (error.description.toLowerCase().contains('timeout') ||
+        error.description.toLowerCase().contains('timed_out')) {
+      return '연결 시간이 초과되었습니다.\n잠시 후 다시 시도해주세요.';
+    } else if (error.description.toLowerCase().contains('name_not_resolved') ||
+        error.description.toLowerCase().contains('host_not_found')) {
+      return '페이지를 찾을 수 없습니다.\nURL을 확인해주세요.';
+    } else {
+      return '페이지 로드 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.';
+    }
+  }
+
+  // 에러 페이지 숨기기 CSS 주입
+  Future<void> _hideErrorPageWithCSS() async {
+    const String hideErrorScript = '''
+    (function() {
+      // 모든 내용 숨기기
+      const style = document.createElement('style');
+      style.textContent = `
+        body, html { 
+          display: none !important; 
+          visibility: hidden !important;
+          overflow: hidden !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      // body가 없는 경우를 대비
+      if (document.body) {
+        document.body.style.display = 'none';
+      }
+      
+      // Chrome 에러 페이지 특정 요소들 숨기기
+      const errorElements = [
+        '#main-frame-error',
+        '.error-code',
+        '.error-text',
+        '#error-information-popup-container',
+        'body'
+      ];
+      
+      errorElements.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          if (el) {
+            el.style.display = 'none !important';
+            el.style.visibility = 'hidden !important';
+          }
+        });
+      });
+    })();
+  ''';
+
+    try {
+      await webViewController.runJavaScript(hideErrorScript);
+    } catch (e) {
+      print('에러 페이지 숨기기 실패: $e');
+    }
+  }
+
+// 에러 오버레이 닫기
+  void _hideErrorOverlay() {
+    setState(() {
+      isShowingError = false;
+      errorMessage = null;
+    });
+  }
+
 // 웹에서 받은 JSON 데이터 처리
   void _handleWebData(Map<String, dynamic> jsonData) {
     print('🌐 웹에서 JSON 데이터 수신: $jsonData');
@@ -341,7 +432,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
 // 웹 데이터를 API로 전송
   Future<void> _sendWebDataToAPI(Map<String, dynamic> jsonData) async {
-    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://192.168.25.33:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -507,7 +598,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // 특정 페이지로 이동하면서 QR 데이터 전송
   void _sendToSpecificPage(String qrData) {
     // 특정 URL 설정 (여기서 수정하세요)
-    const String targetUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_Create';
+    const String targetUrl = 'http://192.168.25.33:9090/Home/Preshiftcheck_Create';
 
     // URL 파라미터로 데이터 전달
     final String urlWithParams = '$targetUrl?CheckType=${'DAILY'}&Date=${DateTime.now()}&Process=${'SMD'}&Line=${'SMTALine'}';
@@ -525,7 +616,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   // API로 QR 데이터 전송 (현재 페이지는 그대로)
   Future<void> _sendToAPI(String qrData) async {
     // 특정 API URL 설정 (여기서 수정하세요)
-    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://192.168.25.33:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -799,17 +890,111 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
           // ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // 로딩 인디케이터
-          if (isLoading)
-            const LinearProgressIndicator(),
-          // 웹뷰
-          Expanded(
-            child: WebViewWidget(
-              controller: webViewController,
-            ),
+          Column(
+            children: [
+              // 로딩 인디케이터
+              if (isLoading)
+                const LinearProgressIndicator(),
+              // 웹뷰
+              Expanded(
+                child: WebViewWidget(
+                  controller: webViewController,
+                ),
+              ),
+            ],
           ),
+
+          // 에러 오버레이
+          if (isShowingError)
+            Container(
+              width: double.infinity,
+              height: double.infinity,
+              color: Colors.white, // 에러 페이지 완전 가리기
+              child: Center(
+                child: Container(
+                  margin: const EdgeInsets.all(40),
+                  padding: const EdgeInsets.all(30),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(15),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.wifi_off,
+                        color: Colors.orange,
+                        size: 60,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        '연결 오류',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      Text(
+                        errorMessage ?? '알 수 없는 오류가 발생했습니다.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 25),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
+                            onPressed: () {
+                              _hideErrorOverlay();
+                              webViewController.reload();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 12
+                              ),
+                            ),
+                            child: const Text('다시 시도'),
+                          ),
+                          ElevatedButton(
+                            onPressed: () {
+                              _hideErrorOverlay();
+                              _loadUrl(defaultUrl);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 12
+                              ),
+                            ),
+                            child: const Text('홈으로'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
