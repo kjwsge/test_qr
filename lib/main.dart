@@ -80,6 +80,69 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
   }
 
+  // [브릿지 호출 메소드]
+  Future<void> appToWebCall(WebViewController controller) async {
+    //showAlertDialog(context, "appToWebCall");
+
+
+    // [초기 변수 선언 및 데이터 삽입] : [map]
+    var map = Map<String, dynamic>();
+
+    map["name"] = "twok";
+    map["age"] = 30;
+
+
+    // [jsonEncode : JSON 인코딩 실시]
+    var jsonString = jsonEncode(map);
+
+
+    await controller.runJavaScript('window.onMessageReceive(${jsonString})');
+  }
+
+  // [팝업창 활성 메소드]
+  Future<dynamic> showAlertDialog(BuildContext context, String message) {
+    return showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text("Alert"),
+        content: Text(message),
+        actions: [
+          ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text("Confirm")),
+        ],
+      ),
+    );
+  }
+
+// [팝업창 활성 메소드 - 확인/취소 버튼]
+  Future<bool?> showConfirmDialog(BuildContext context, String message) { // 반환 타입을 bool?로 변경
+    return showDialog<bool>( // showDialog의 제네릭 타입도 bool로 변경
+      context: context,
+      barrierDismissible: false, // 사용자가 다이얼로그 바깥을 탭해도 닫히지 않도록 설정 (선택 사항)
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Confirm"), // 제목을 "Confirm"으로 변경 (선택 사항)
+          content: Text(message),
+          actions: <Widget>[ // actions 타입을 명시적으로 <Widget>으로 지정하는 것이 좋음
+            TextButton( // "Cancel" 버튼은 TextButton을 사용하는 경우가 많음 (덜 강조)
+              child: const Text("Cancel"),
+              onPressed: () {
+                Navigator.of(context).pop(false); // "Cancel"을 누르면 false 반환
+              },
+            ),
+            ElevatedButton( // "Confirm" 버튼은 ElevatedButton을 사용 (더 강조)
+              child: const Text("Confirm"),
+              onPressed: () {
+                Navigator.of(context).pop(true); // "Confirm"을 누르면 true 반환
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
 // 웹뷰 초기화
   // lib/main.dart의 _initializeWebView() 메서드 수정
   void _initializeWebView() {
@@ -101,6 +164,12 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
           });
         },
       )
+      ..addJavaScriptChannel('Alert', onMessageReceived: (JavaScriptMessage message){
+        showAlertDialog(context, message.message);
+      },)
+      ..addJavaScriptChannel('Confirm', onMessageReceived: (JavaScriptMessage message){
+        showConfirmDialog(context, message.message);
+      },)
       ..setNavigationDelegate(
         NavigationDelegate(
           // 🔧 URL 필터링 강화
@@ -144,6 +213,49 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             _saveLastUrl(url);
             // 웹페이지 제목 추출 및 헤더 숨기기
             _extractPageTitle();
+
+            // TODO [Alert 팝업창 표시 대응 위한 스크립트 코드 작성] >> [Web To App 브릿지 받는 구간에서 Alert 정의 (addJavaScriptChannel)]
+            try {
+              var javascript = '''
+              window.alert = function (e){
+                var uagent = navigator.userAgent.toLowerCase();
+                var android_agent = uagent.search("android");
+                var iphone = uagent.search("iphone");
+                var ipad = uagent.search("ipad");
+                
+                if (android_agent > -1) {
+
+                    window.Alert.postMessage(String(e));
+                }
+                else {
+                    window.webkit.messageHandlers.Alert.postMessage(String(e));
+                }
+                
+              }
+              ''';
+
+              //   var javascript2 = '''
+              // window.confirm = function (e){
+              //   var uagent = navigator.userAgent.toLowerCase();
+              //   var android_agent = uagent.search("android");
+              //   var iphone = uagent.search("iphone");
+              //   var ipad = uagent.search("ipad");
+              //
+              //   if (android_agent > -1) {
+              //
+              //       window.Confirm.postMessage(String(e));
+              //   }
+              //   else {
+              //       window.webkit.messageHandlers.Confirm.postMessage(String(e));
+              //   }
+              //
+              // }
+              // ''';
+
+              webViewController.runJavaScript(javascript);
+
+              // webViewController.runJavaScript(javascript2);
+            } catch (_) {}
           },
 
           // 🔧 에러 처리 강화
