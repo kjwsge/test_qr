@@ -149,25 +149,13 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
           });
         },
       )
-      ..addJavaScriptChannel('Alert', onMessageReceived: (JavaScriptMessage message){
-        showAlertDialog(context, message.message);
-      },)
-      ..addJavaScriptChannel('Confirm', onMessageReceived: (JavaScriptMessage message) async {
-        try {
-          final result = await showConfirmDialog(context, message.message);
-          // 안전하게 boolean 값만 전달
-          await webViewController.runJavaScript('''
-      window._confirmResult = ${result ? 'true' : 'false'};
-      window._confirmWaiting = false;
-    ''');
-        } catch (e) {
-          // 에러 발생 시에도 대기 해제
-          print('Confirm 처리 오류: $e');
-          await webViewController.runJavaScript('''
-      window._confirmResult = false;
-      window._confirmWaiting = false;
-    ''');
-        }
+    // 🔥 공식 JavaScript Alert Dialog 처리
+      ..setOnJavaScriptAlertDialog((JavaScriptAlertDialogRequest request) async {
+        await showAlertDialog(context, request.message);
+      })
+    // 🔥 공식 JavaScript Confirm Dialog 처리
+      ..setOnJavaScriptConfirmDialog((JavaScriptConfirmDialogRequest request) async {
+        return await showConfirmDialog(context, request.message);
       })
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -216,69 +204,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             // 웹페이지 제목 추출 및 헤더 숨기기
             _extractPageTitle();
 
-            try {
-              var javascript = '''
-              window.confirm = function (message) {
-                var uagent = navigator.userAgent.toLowerCase();
-                var android_agent = uagent.search("android");
-                
-                // 초기화
-                window._confirmResult = undefined;
-                window._confirmWaiting = true;
-                
-                try {
-                  if (android_agent > -1) {
-                    window.Confirm.postMessage(String(message));
-                  } else {
-                    window.webkit.messageHandlers.Confirm.postMessage(String(message));
-                  }
-                } catch (e) {
-                  console.log('Confirm 메시지 전송 오류:', e);
-                  window._confirmWaiting = false;
-                  return false;
-                }
-                
-                // 동기적 대기
-                var startTime = Date.now();
-                var maxWait = 30000; // 30초 타임아웃
-                
-                while (window._confirmWaiting && (Date.now() - startTime) < maxWait) {
-                  if (window._confirmResult === 'true') {
-                    window._confirmWaiting = false;
-                    delete window._confirmResult;
-                    return true;
-                  } else if (window._confirmResult === 'false') {
-                    window._confirmWaiting = false;
-                    delete window._confirmResult;
-                    return false;
-                  }
-                  
-                  // CPU 부하 줄이기
-                  var delay = Date.now();
-                  while (Date.now() - delay < 50) {} // 50ms 대기
-                }
-                
-                // 타임아웃 시
-                console.log('Confirm 타임아웃');
-                window._confirmWaiting = false;
-                return false;
-              };
-              
-              // alert는 그대로
-              window.alert = function (e){
-                var uagent = navigator.userAgent.toLowerCase();
-                var android_agent = uagent.search("android");
-                
-                if (android_agent > -1) {
-                  window.Alert.postMessage(String(e));
-                } else {
-                  window.webkit.messageHandlers.Alert.postMessage(String(e));
-                }
-              };
-              ''';
 
-              webViewController.runJavaScript(javascript);
-            } catch (_) {}
           },
 
           // 🔧 에러 처리 강화
