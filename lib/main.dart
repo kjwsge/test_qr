@@ -47,11 +47,12 @@ class WebBrowserScreen extends StatefulWidget {
 class _WebBrowserScreenState extends State<WebBrowserScreen> {
   late WebViewController webViewController;
   String currentUrl = '';
-  String defaultUrl = 'http://192.168.25.33:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
+  String defaultUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_list'; // 🔧 여기에 기본 URL을 입력하세요
   bool isLoading = true;
   String webPageTitle = 'PeopleWorks CheckList';
   bool isShowingError = false; // 에러 오버레이 표시 상태
   String? errorMessage; // 에러 메시지
+  bool isFromQRScan = false; // 🔥 추가
 
   @override
   void initState() {
@@ -76,7 +77,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      defaultUrl = prefs.getString('default_url') ?? 'http://192.168.25.33:9090/Home/Preshiftcheck_list';
+      defaultUrl = prefs.getString('default_url') ?? 'http://10.10.10.100:9090/Home/Preshiftcheck_list';
       currentUrl = prefs.getString('last_url') ?? defaultUrl; // last_url이 없으면 defaultUrl 사용
     });
     print('🔧 설정 로드 완료: currentUrl = $currentUrl, defaultUrl = $defaultUrl');
@@ -165,7 +166,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
             // 허용된 도메인 체크
             final allowedDomains = [
-              '192.168.25.33',
+              '10.10.10.100',
             ];
 
             final uri = Uri.parse(request.url);
@@ -204,7 +205,11 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
             // 웹페이지 제목 추출 및 헤더 숨기기
             _extractPageTitle();
 
-
+            // QR 스캔으로 온 Create 페이지에서만 자동 설정
+            if (url.contains('Preshiftcheck_Create') && isFromQRScan) {
+              _autoSetupCreatePage();
+              isFromQRScan = false; // 플래그 초기화
+            }
           },
 
           // 🔧 에러 처리 강화
@@ -243,6 +248,69 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
       );
 
     print('🔩 웹뷰 초기화 완료 (강화된 설정)');
+  }
+
+// Create 페이지 자동 설정 메서드
+  Future<void> _autoSetupCreatePage() async {
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    const String autoSetupScript = '''
+    (function() {
+      try {
+        console.log('🤖 QR 스캔 자동 설정 시작');
+        
+        const typeSelect = document.getElementById("idType");
+        if (typeSelect) {
+          typeSelect.value = "1";
+          console.log('✅ CheckType 설정:', typeSelect.value);
+        }
+        
+        const processSelect = document.getElementById("idProcess");
+        if (processSelect) {
+          processSelect.value = "SMD";
+          const changeEvent = new Event('change', { bubbles: true });
+          processSelect.dispatchEvent(changeEvent);
+          console.log('✅ Process 설정:', processSelect.value);
+        }
+        
+        const today = new Date().toISOString().split('T')[0];
+        const dateInput = document.getElementById("datepicker_value");
+        if (dateInput) {
+          dateInput.value = today;
+          console.log('✅ 날짜 설정:', today);
+        }
+        
+        setTimeout(function() {
+          const lineSelect = document.getElementById("idLine");
+          if (lineSelect && lineSelect.options.length > 1) {
+            lineSelect.selectedIndex = 1;
+            console.log('✅ Line 설정:', lineSelect.value);
+          }
+          
+          setTimeout(function() {
+            console.log('🚀 getItems 자동 실행');
+            if (typeof getItems === 'function') {
+              const originalConfirm = window.confirm;
+              window.confirm = function() { return true; };
+              getItems();
+              setTimeout(() => { window.confirm = originalConfirm; }, 100);
+              console.log('✅ getItems 실행 완료');
+            }
+          }, 800);
+        }, 1200);
+        
+      } catch (error) {
+        console.log('❌ 자동 설정 오류:', error);
+      }
+    })();
+  ''';
+
+    try {
+      await webViewController.runJavaScript(autoSetupScript);
+      print('🤖 자동 설정 스크립트 주입 완료');
+    } catch (e) {
+      print('❌ 자동 설정 스크립트 오류: $e');
+    }
   }
 
   // 에러 메시지 변환 함수
@@ -358,7 +426,7 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
 
 // 웹 데이터를 API로 전송
   Future<void> _sendWebDataToAPI(Map<String, dynamic> jsonData) async {
-    const String apiUrl = 'http://192.168.25.33:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
@@ -520,29 +588,44 @@ class _WebBrowserScreenState extends State<WebBrowserScreen> {
     );
   }
 
-
-  // 특정 페이지로 이동하면서 QR 데이터 전송
   void _sendToSpecificPage(String qrData) {
-    // 특정 URL 설정 (여기서 수정하세요)
-    const String targetUrl = 'http://192.168.25.33:9090/Home/Preshiftcheck_Create';
+    // QR 스캔 플래그 설정
+    isFromQRScan = true; // 🔥 추가
 
-    // URL 파라미터로 데이터 전달
-    final String urlWithParams = '$targetUrl?CheckType=${'DAILY'}&Date=${DateTime.now()}&Process=${'SMD'}&Line=${'SMTALine'}';
+    const String targetUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_Create';
 
-    _loadUrl(urlWithParams);
+    _loadUrl(targetUrl);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Move by QR Data'),
-        duration: const Duration(seconds: 3),
+        content: Text('QR 스캔으로 페이지 이동 중...'),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
 
+  // // 특정 페이지로 이동하면서 QR 데이터 전송
+  // void _sendToSpecificPage(String qrData) {
+  //   // 특정 URL 설정 (여기서 수정하세요)
+  //   const String targetUrl = 'http://10.10.10.100:9090/Home/Preshiftcheck_Create';
+  //
+  //   // URL 파라미터로 데이터 전달
+  //   final String urlWithParams = '$targetUrl?CheckType=${'DAILY'}&Date=${DateTime.now()}&Process=${'SMD'}&Line=${'SMTALine'}';
+  //
+  //   _loadUrl(urlWithParams);
+  //
+  //   ScaffoldMessenger.of(context).showSnackBar(
+  //     SnackBar(
+  //       content: Text('Move by QR Data'),
+  //       duration: const Duration(seconds: 3),
+  //     ),
+  //   );
+  // }
+
   // API로 QR 데이터 전송 (현재 페이지는 그대로)
   Future<void> _sendToAPI(String qrData) async {
     // 특정 API URL 설정 (여기서 수정하세요)
-    const String apiUrl = 'http://192.168.25.33:9090/LSEVP/Post/QR';
+    const String apiUrl = 'http://10.10.10.100:9090/LSEVP/Post/QR';
 
     try {
       final response = await http.post(
